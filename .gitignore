@@ -1,0 +1,6 @@
+# Top-level
+/.idea
+
+# Artifacts
+bin
+obj
