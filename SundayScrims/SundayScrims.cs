@@ -9,6 +9,17 @@ using MySqlConnector;
 
 namespace SundayScrims;
 
+/*
+ * CREATE TABLE IF NOT EXISTS player_ratings (
+    steam_id BIGINT UNSIGNED NOT NULL,
+    rating INT NOT NULL DEFAULT 1000,
+    wins INT NOT NULL DEFAULT 0,
+    losses INT NOT NULL DEFAULT 0,
+    last_played DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (steam_id)
+);
+ */
+
 public class SundayScrims : BasePlugin, IPluginConfig<Config>
 {
     public override string ModuleName => "SundayScrims";
@@ -36,6 +47,20 @@ public class SundayScrims : BasePlugin, IPluginConfig<Config>
         Logger.LogInformation("Getting ready to load {ModuleName}@{ModuleVersion}", ModuleName, ModuleVersion);
 
         AddCommand("balance", "Balance two teams and start match", OnBalanceCommand);
+        AddCommand("scrims", "Plugin description", (p, _) =>
+        {
+            if (p != null)
+            {
+                p.PrintToChat("https://github.com/Herbstein/SundayScrims");
+            }
+        });
+        AddCommand("reset", "Stop everything", (player, info) =>
+        {
+            _isLive = false;
+            _teamAssignments.Clear();
+            _mainThreadActions.Clear();
+        });
+
 
         RegisterEventHandler<EventPlayerConnectFull>(OnPlayerConnectFull);
         RegisterEventHandler<EventCsWinPanelMatch>(OnWinPanelMatch);
@@ -153,7 +178,8 @@ public class SundayScrims : BasePlugin, IPluginConfig<Config>
         _isLive = true;
 
         Server.PrintToChatAll("[Scrims] Teams Balanced! Restarting game...");
-        Server.ExecuteCommand("mp_restartgame 5");
+        Server.ExecuteCommand("mp_warmup_end");
+        Server.ExecuteCommand("mp_restartgame 1");
     }
 
     private HookResult OnPlayerConnectFull(EventPlayerConnectFull @event, GameEventInfo info)
@@ -248,25 +274,46 @@ public class SundayScrims : BasePlugin, IPluginConfig<Config>
 
     private HookResult OnWinPanelMatch(EventCsWinPanelMatch @event, GameEventInfo info)
     {
+        Server.PrintToChatAll("[Scrims] Start Game Over");
+
         if (!_isLive)
         {
             return HookResult.Continue;
         }
 
-        var gameRules = Utilities.FindAllEntitiesByDesignerName<CCSGameRulesProxy>("cs_gamerules").FirstOrDefault();
-        CsTeam winningTeam;
-        if (gameRules?.GameRules?.AccountCT > gameRules?.GameRules?.AccountTerrorist)
+        var ctScore = 0;
+        var tScore = 0;
+
+        var teams = Utilities.FindAllEntitiesByDesignerName<CCSTeam>("cs_team_manager");
+        foreach (var team in teams)
+        {
+            Server.PrintToChatAll($"[Scrims] {team.InitialTeamNum}: {team.Score}");
+
+            switch (team.InitialTeamNum)
+            {
+                case (int)CsTeam.CounterTerrorist:
+                    ctScore = team.Score;
+                    break;
+                case (int)CsTeam.Terrorist:
+                    tScore = team.Score;
+                    break;
+            }
+        }
+
+
+        Server.PrintToChatAll($"[Scrims] Match over. Final Score - CT: {ctScore}, T: {tScore}");
+
+        var winningTeam = CsTeam.None;
+        if (ctScore > tScore)
         {
             winningTeam = CsTeam.CounterTerrorist;
         }
-        else if (gameRules?.GameRules?.AccountCT < gameRules?.GameRules?.AccountTerrorist)
+        else if (ctScore < tScore)
         {
             winningTeam = CsTeam.Terrorist;
         }
-        else
-        {
-            winningTeam = CsTeam.None;
-        }
+
+        Server.PrintToChatAll($"[Scrims] Winning team: {winningTeam}");
 
         if (winningTeam == CsTeam.None)
         {
